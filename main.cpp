@@ -1,28 +1,34 @@
 #include "main.h"
-#include "lemlib/api.hpp" // IWYU pragma: keep
-/**
- * A callback function for LLEMU's center button.
- *
- * When this callback is fired, it will toggle line 2 of the LCD text between
- * "I was pressed!" and nothing.
- */
+#include "lemlib/api.hpp"
 
-pros::Controller controller(pros::E_CONTROLLER_MASTER);
-pros::MotorGroup left_motors({3, 7, -13}, pros::MotorGearset::blue);
-pros::MotorGroup right_motors({-18, -14, 2}, pros::MotorGearset::blue); 
+// // Left motors
+// pros::Motor left_motor_1(3, pros::E_MOTOR_GEARSET_06, true);   // Port 3, reversed
+// pros::Motor left_motor_2(7, pros::E_MOTOR_GEARSET_06, true);   // Port 7, reversed
+// pros::Motor left_motor_3(13, pros::E_MOTOR_GEARSET_06, false); // Port 13, not reversed
+
+// // Right motors
+// pros::Motor right_motor_1(18, pros::E_MOTOR_GEARSET_06, false); // Port 18, not reversed
+// pros::Motor right_motor_2(14, pros::E_MOTOR_GEARSET_06, false); // Port 14, not reversed
+// pros::Motor right_motor_3(1, pros::E_MOTOR_GEARSET_06, true);   // Port 2, reversed
+
+// Create motor groups
+pros::MotorGroup left_motors({-3,-7,13});
+pros::MotorGroup right_motors({18,14,-2});
+
+
 
 // drivetrain settings
 lemlib::Drivetrain drivetrain(&left_motors, // left motor group
                               &right_motors, // right motor group
                               12.5, // 12.5 inch track width
                               lemlib::Omniwheel::NEW_275, // using new 4" omnis
-                              465.5, // change to 470 or 480 if this causes issues somehow
+                              466, // change to 470 or 480 if this causes issues somehow
                               2 // horizontal drift is 2 (for now)
 );
-pros::Imu imu(4); // inertial sensor instantiation
+pros::Imu imu(2); // inertial sensor instantiation
 
-pros::Rotation vertical_encoder(-21); // creates a v5 rotation sensor for odom on port 1
-pros::Rotation	horizontal_encoder(5); // creates another v5 rotation sensor for odom on port 1
+pros::Rotation vertical_encoder(-5); // creates a v5 rotation sensor for odom on port 1
+pros::Rotation	horizontal_encoder(20); // creates another v5 rotation sensor for odom on port 1
 
 //Vertical tracking wheels are parallel with the wheels on the drivetrain. Horizontal tracking wheels are perpendicular to the wheels on the drivetrain.
 
@@ -33,7 +39,7 @@ lemlib::TrackingWheel vertical_tracking_wheel(&vertical_encoder, lemlib::Omniwhe
 
 lemlib::OdomSensors sensors(&vertical_tracking_wheel, // vertical tracking wheel 1, set to null
                             nullptr, // vertical tracking wheel 2, set to nullptr as we are using IMEs
-                            &horizontal_tracking_wheel, // horizontal tracking wheel 1
+                            nullptr, // horizontal tracking wheel 1
                             nullptr, // horizontal tracking wheel 2, set to nullptr as we don't have a second one
                             &imu // inertial sensor
 );
@@ -103,78 +109,71 @@ void on_center_button() {
  * to keep execution time for this mode under a few seconds.
  */
 void initialize() {
-    pros::lcd::initialize(); // initialize brain screen
-    imu.reset(); //reset imu
+    pros::lcd::initialize(); // Initialize brain screen
+    
+    chassis.calibrate(); // Calibrate sensors (including IMU)
 
+    // Wait for IMU to finish calibrating
+    while (imu.is_calibrating()) {
+        pros::delay(10);
+    }
+
+    // Print position to brain screen
+    pros::Task screen_task([&]() {
+        while (true) {
+            // Print robot location to the brain screen
+            pros::lcd::print(0, "X: %f", chassis.getPose().x); // x
+            pros::lcd::print(1, "Y: %f", chassis.getPose().y); // y
+            pros::lcd::print(2, "Theta: %f", chassis.getPose().theta); // heading
+            // Delay to save resources
+            pros::delay(20);
+        }
+    });
 }
 
 
+
 /**
- * Runs while the robot is in the disabled state of Field Management System or
- * the VEX Competition Switch, following either autonomous or opcontrol. When
- * the robot is enabled, this task will exit.
+ * Runs while the robot is disabled
  */
 void disabled() {}
 
 /**
- * Runs after initialize(), and before autonomous when connected to the Field
- * Management System or the VEX Competition Switch. This is intended for
- * competition-specific initialization routines, such as an autonomous selector
- * on the LCD.
- *
- * This task will exit when the robot is enabled and autonomous or opcontrol
- * starts.
+ * runs after initialize if the robot is connected to field control
  */
 void competition_initialize() {}
 
+// get a path used for pure pursuit
+// this needs to be put outside a function
+// ASSET(example_txt); // '.' replaced with "_" to make c++ happy
+
 /**
- * Runs the user autonomous code. This function will be started in its own task
- * with the default priority and stack size whenever the robot is enabled via
- * the Field Management System or the VEX Competition Switch in the autonomous
- * mode. Alternatively, this function may be called in initialize or opcontrol
- * for non-competition testing purposes.
+ * Runs during auto
  *
- * If the robot is disabled or communications is lost, the autonomous task
- * will be stopped. Re-enabling the robot will restart the task, not re-start it
- * from where it left off.
+ * This is an example autonomous routine which demonstrates a lot of the features LemLib has to offer
  */
 void autonomous() {
-    pros::lcd::print(0, "Autonomous started");  // Debug: Indicate autonomous is starting
-    // set position to x:0, y:0, heading:0
-    chassis.setPose(0, 0, 0);
+    imu.reset();
+     chassis.setPose(0, 0, 0);
     // turn to face heading 90 with a very long timeout
-    chassis.turnToPoint(10,10, 100);
+    chassis.turnToHeading(90, 100000);
 }
 
 /**
- * Runs the operator control code. This function will be started in its own task
- * with the default priority and stack size whenever the robot is enabled via
- * the Field Management System or the VEX Competition Switch in the operator
- * control mode.
- *
- * If no competition control is connected, this function will run immediately
- * following initialize().
- *
- * If the robot is disabled or communications is lost, the
- * operator control task will be stopped. Re-enabling the robot will restart the
- * task, not resume it from where it left off.
+ * Runs in driver control
  */
+pros::Controller controller(pros::E_CONTROLLER_MASTER);
 void opcontrol() {
-	pros::Controller master(pros::E_CONTROLLER_MASTER);
-	pros::MotorGroup left_mg({1, -2, 3});    // Creates a motor group with forwards ports 1 & 3 and reversed port 2
-	pros::MotorGroup right_mg({-4, 5, -6});  // Creates a motor group with forwards port 5 and reversed ports 4 & 6
-
-
-	while (true) {
-		pros::lcd::print(0, "%d %d %d", (pros::lcd::read_buttons() & LCD_BTN_LEFT) >> 2,
-		                 (pros::lcd::read_buttons() & LCD_BTN_CENTER) >> 1,
-		                 (pros::lcd::read_buttons() & LCD_BTN_RIGHT) >> 0);  // Prints status of the emulated screen LCDs
-
-		// Arcade control scheme
-		int dir = master.get_analog(ANALOG_LEFT_Y);    // Gets amount forward/backward from left joystick
-		int turn = master.get_analog(ANALOG_RIGHT_X);  // Gets the turn left/right from right joystick
-		left_mg.move(dir - turn);                      // Sets left motor voltage
-		right_mg.move(dir + turn);                     // Sets right motor voltage
-		pros::delay(20);                               // Run for 20 ms then update
-	}
+    // controller
+    // loop to continuously update motors
+    while (true) {
+        // get joystick positions
+        int leftY = controller.get_analog(pros::E_CONTROLLER_ANALOG_LEFT_Y);
+        int rightX = controller.get_analog(pros::E_CONTROLLER_ANALOG_RIGHT_X);
+        // move the chassis with curvature drive
+        chassis.arcade(leftY, rightX);
+        // delay to save resources
+        pros::delay(10);
+    }
 }
+
