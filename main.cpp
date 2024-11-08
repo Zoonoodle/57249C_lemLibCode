@@ -1,7 +1,6 @@
 #include "main.h"
-#include "lemlib/api.hpp" 
+#include "lemlib/api.hpp"
 #include "lemlib/chassis/chassis.hpp"
-
 #include "lemlib/chassis/trackingWheel.hpp"
 #include "pros/abstract_motor.hpp"
 #include "pros/misc.h"
@@ -10,34 +9,40 @@
 #include "pros/optical.hpp"
 #include "pros/rotation.hpp"
 #include "pros/rtos.hpp"
-#include "autons.h"  
+#include "autons.h"
 #include "global.h"
 #include "pros/screen.hpp"
 #include <cmath>
-#include <concepts>
-#include <span>
-#include <sys/_intsup.h>
-#include <sys/signal.h>
-#include "pros/rtos.hpp" // Include for PROS tasks
+#include <vector>
+#include <random>
 
+
+//#include <concepts>
+//#include <span>
+//#include <sys/_intsup.h>
+//#include <sys/signal.h>
+
+// PROS Controller
 pros::Controller controller(pros::E_CONTROLLER_MASTER);
 
-   
+
     pros::ADIDigitalOut mogo('A'); 
     pros::ADIDigitalOut doinker('E'); 
-    pros::ADIDigitalOut hang('C'); 
+    pros::ADIDigitalOut intakeLift('H'); 
+
+
 
     // pros::Optical sorter(11);
    
 
     bool mogoActivated = false;
-    bool doinkerActivated = false;
+    bool intakeActivated = false;
 
     pros::Motor intake(18, pros::MotorGearset::blue);
 
 
-pros::Rotation armSensor(6);
-pros::MotorGroup left_motors({-3, -1, -8}, 
+pros::Rotation armSensor(19);
+pros::MotorGroup left_motors({-3, -6, -8}, 
                      
                         pros::MotorGearset::blue); 
 pros::MotorGroup right_motors({12, 15, 11}, 
@@ -49,11 +54,13 @@ pros::MotorGroup armMotors({10, -20},
 pros::Imu imu(16);
 
 pros::Rotation vertical_encoder(9); 
-pros::Rotation horizontal_encoder(-21);
+pros::Rotation horizontal_encoder(21);
+
 
 
 lemlib::TrackingWheel vertical(&vertical_encoder, lemlib::Omniwheel::NEW_2, -.5);
-lemlib::TrackingWheel horizontal(&horizontal_encoder, lemlib::Omniwheel::NEW_2, 4.5);
+lemlib::TrackingWheel horizontal(&horizontal_encoder, lemlib::Omniwheel::NEW_2, -3.5);
+
 
 lemlib::Drivetrain drivetrain(&left_motors, 
                               &right_motors, 
@@ -62,61 +69,53 @@ lemlib::Drivetrain drivetrain(&left_motors,
                               450, 
                               2 
 );
+// Controller Settings
+lemlib::ControllerSettings lateral_controller(
+    20.0,    // kP
+    0,  // kI
+    2.0,   // kD
+    3.0,    // Integral limit
+    1.0,    // Slew rate
+    100.0,  // Max output
+    3.0,    // Deadband
+    500.0,  // On target time
+    5.0     // Tolerance
+);
 
+lemlib::ControllerSettings angular_controller(
+    2.0,    // kP
+    0.0,    // kI
+    10.0,   // kD
+    3.0,    // Integral limit
+    1.0,    // Slew rate
+    100.0,  // Max output
+    3.0,    // Deadband
+    500.0,  // On target time
+    0.0     // Tolerance
+);
 
-lemlib::ControllerSettings lateral_controller(6, 
-    0.001, 
-    23  ,  
-    0,  
-    4,  
-    100, 
-    5,  
-    300, 
-    5  
+// Odometry Sensors
+lemlib::OdomSensors sensors(
+    &vertical,          // Left tracking wheel
+    nullptr,            // Right tracking wheel (not used)
+    &horizontal,        // Back tracking wheel
+    nullptr,            // Front tracking wheel (not used)
+    &imu                // Inertial sensor
 );
 
 
-lemlib::ControllerSettings angular_controller(2, 
-                                              0, 
-                                              10 , 
-                                              3, 
-                                              1, 
-                                              100, 
-                                              3, 
-                                              500, 
-                                              0 
+lemlib::ExpoDriveCurve throttle_curve(3, 10, 1.008);
+lemlib::ExpoDriveCurve steer_curve(3, 10, 1.008);
+
+
+lemlib::Chassis chassis(
+    drivetrain,
+    lateral_controller,
+    angular_controller,
+    sensors,
+    &throttle_curve,
+    &steer_curve
 );
-
-
-lemlib::OdomSensors sensors(&vertical, 
-                            nullptr, 
-                            &horizontal,
-                            nullptr, 
-                            &imu 
-);
-
-
-lemlib::ExpoDriveCurve throttle_curve(3, 
-                                     10, 
-                                     1.019 
-);
-
-
-lemlib::ExpoDriveCurve steer_curve(3, 
-                                  10, 
-                                  1.019 
-);
-
-
-lemlib::Chassis chassis(drivetrain,
-                        lateral_controller,
-                        angular_controller,
-                        sensors,
-                        &throttle_curve, 
-                        &steer_curve
-);
-
-
 
 double armZeroOffset = 0;
 
@@ -133,9 +132,8 @@ int i = 0;
 
 void armLoadRings(void* param) {
     armIsMoving = true;
-    
    
-    double targetAngle = 11000;
+    double targetAngle = 2000;
     double armRotation = getZeroedAngle();
 
     
@@ -156,7 +154,7 @@ void armLoadRings(void* param) {
         while (armIsMoving) {
             armRotation = getZeroedAngle(); // Update rotation value
 
-            if (armRotation > armZeroOffset) {
+            if (armRotation > targetAngle) {
                 armMotors.move(60); 
             } else {
                 armMotors.move(0);
@@ -165,28 +163,9 @@ void armLoadRings(void* param) {
             pros::delay(20);
         }
     }
-armMotors.move(0);
     armMotors.set_brake_mode(pros::MotorBrake::hold);
-    
+
 }
-
-
-
-// void arm_move_load(){
-//     armIsMoving = true;
-//     while(armIsMoving){
-//         armMotors.move(-60);
-//         while(armSensor.get_position()>16000){
-//             pros::delay(20);
-//         }
-//         if(armSensor.get_position()<16000){
-//             armIsMoving = false;
-//         }
-//     }
-//     armMotors.set_brake_mode(pros::MotorBrake::hold);
-//     armMotors.move(0);
-// }
-
 
 /*
 class RamseteController {
@@ -291,7 +270,7 @@ void initialize() {
     pros::lcd::initialize(); 
     
     chassis.calibrate(); 
-   
+     
 
 
         armZeroOffset = armSensor.get_position();
@@ -303,7 +282,7 @@ void initialize() {
             
             pros::lcd::print(0, "X: %f", chassis.getPose().x); // x
             pros::lcd::print(1, "Y: %f", chassis.getPose().y); // y
-            pros::lcd::print(2, "Theta: %f", chassis.getPose().theta - 148); // heading
+            pros::lcd::print(2, "Theta: %f", chassis.getPose().theta); // heading
             // log position telemetry
             lemlib::telemetrySink()->info("Chassis pose: {}", chassis.getPose());
             // delay to save resources
@@ -346,7 +325,7 @@ void competition_initialize() {}
  */
 void autonomous() {
  
-     int autonSelector = 2;  
+     int autonSelector = 1;  
 
     switch (autonSelector) {
         case 1:
@@ -397,18 +376,20 @@ void opcontrol() {
 
         if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L1)) {
     armMotors.move(-127); 
-    if(controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_Y)) {
-        armMotors.move(127);
-    }
+   
 
 } else if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_L2)) {
     pros::Task armTask(armLoadRings, nullptr, "Arm Load Rings Task");
-    pros::delay(250);
+    pros::delay(1000);
      
 } else {
     armMotors.move(0); 
 }
 
+
+     if (controller.get_digital(pros::E_CONTROLLER_DIGITAL_B)) {
+         armMotors.move(127);
+        }
        
         if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_A)) {
             mogoActivated = !mogoActivated; 
@@ -417,10 +398,7 @@ void opcontrol() {
 
    
 
-        if (controller.get_digital_new_press(pros::E_CONTROLLER_DIGITAL_L1)) {
-            doinkerActivated = !doinkerActivated;
-            doinker.set_value(doinkerActivated);
-        }
+       
 
 
         
